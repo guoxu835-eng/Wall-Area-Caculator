@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>澳洲建筑算量小工具 - PDF Takeoff</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --panel: #16213e;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --text: #eaeaea;
+            --muted: #8892a4;
+            --border: #2a2a4a;
+            --canvas-bg: #ffffff;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ── TOP BAR ── */
+        header {
+            background: var(--panel);
+            border-bottom: 2px solid var(--accent);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .brand {
+            font-size: 14px;
+            font-weight: bold;
+            color: var(--accent);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .upload-btn {
+            position: relative;
+            overflow: hidden;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            font-family: inherit;
+            font-size: 12px;
+            letter-spacing: 1px;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: opacity .2s;
+        }
+        .upload-btn:hover { opacity: .85; }
+        .upload-btn input {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+            font-size: 0;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+        .control-group label { white-space: nowrap; }
+        .control-group input[type=number] {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px 8px;
+            width: 72px;
+            font-family: inherit;
+            font-size: 12px;
+        }
+
+        /* mode buttons */
+        .mode-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            padding: 6px 14px;
+            font-family: inherit;
+            font-size: 11px;
+            letter-spacing: 1px;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all .2s;
+        }
+        .mode-btn.active, .mode-btn:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+
+        .icon-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            padding: 6px 10px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all .2s;
+            line-height: 1;
+        }
+        .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .icon-btn:disabled { opacity: .3; cursor: default; }
+
+        /* ── PAGE NAV BAR ── */
+        #page-nav {
+            background: var(--accent2);
+            border-bottom: 1px solid var(--border);
+            padding: 8px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 12px;
+        }
+        #page-nav.hidden { display: none; }
+
+        .page-jump {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .page-jump input {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 4px 8px;
+            width: 52px;
+            font-family: inherit;
+            font-size: 12px;
+            text-align: center;
+        }
+        #page-info { color: var(--muted); }
+
+        /* ── MAIN LAYOUT ── */
+        .main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* ── CANVAS AREA ── */
+        #viewer-wrap {
+            flex: 1;
+            overflow: auto;
+            position: relative;
+            background: #2a2a3e;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
+        }
+
+        #canvas-container {
+            position: relative;
+            display: inline-block;
+            box-shadow: 0 8px 40px rgba(0,0,0,.6);
+        }
+
+        #pdf-canvas {
+            display: block;
+            background: var(--canvas-bg);
+            cursor: crosshair;
+        }
+
+        /* SVG overlay lives on top of canvas */
+        #svg-overlay {
+            position: absolute;
+            top: 0; left: 0;
+            pointer-events: none;
+        }
+
+        /* ── SIDEBAR ── */
+        #sidebar {
+            width: 280px;
+            background: var(--panel);
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--accent);
+        }
+
+        #measurements {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .measure-item {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-left: 3px solid;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            font-size: 11px;
+            position: relative;
+        }
+        .measure-item .m-label {
+            font-weight: bold;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+        .measure-item .m-value {
+            font-size: 15px;
+            font-weight: bold;
+            color: var(--text);
+        }
+        .measure-item .m-meta {
+            color: var(--muted);
+            margin-top: 3px;
+        }
+        .measure-item .del-btn {
+            position: absolute;
+            top: 8px; right: 8px;
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+            padding: 2px 5px;
+        }
+        .measure-item .del-btn:hover { color: var(--accent); }
+
+        .sidebar-footer {
+            border-top: 1px solid var(--border);
+            padding: 12px 16px;
+        }
+        .total-box {
+            background: var(--bg);
+            border: 1px solid var(--accent);
+            padding: 10px 14px;
+            font-size: 11px;
+        }
+        .total-box .total-label { color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+        .total-box .total-val {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--accent);
+            margin-top: 2px;
+        }
+        .clear-btn {
+            margin-top: 10px;
+            width: 100%;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            padding: 8px;
+            font-family: inherit;
+            font-size: 11px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all .2s;
+        }
+        .clear-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* ── STATUS BAR ── */
+        #status-bar {
+            background: #0d0d1a;
+            border-top: 1px solid var(--border);
+            padding: 6px 24px;
+            font-size: 11px;
+            color: var(--muted);
+            letter-spacing: 1px;
+            min-height: 28px;
+        }
+        #status-bar span { color: var(--accent); }
+
+        /* ── TOOLTIP crosshair dot ── */
+        #cursor-dot {
+            position: fixed;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            display: none;
+            z-index: 100;
+        }
+
+        /* scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--border); }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="brand">AU PDF Takeoff</div>
+
+    <label class="upload-btn">
+        ⬆ 上传图纸
+        <input type="file" id="file-input" accept="application/pdf">
+    </label>
+
+    <div class="control-group">
+        <label>比例尺 1 :</label>
+        <input type="number" id="scale-ratio" value="100" min="1">
+    </div>
+
+    <div style="display:flex;gap:6px;">
+        <button class="mode-btn active" id="btn-area" onclick="setMode('area')">■ 面积</button>
+        <button class="mode-btn" id="btn-length" onclick="setMode('length')">— 长度</button>
+    </div>
+
+    <button class="icon-btn" id="undo-btn" onclick="undoPoint()" title="撤销上一个点">↩ 撤销点</button>
+    <button class="icon-btn" onclick="finishShape()" title="完成当前形状 (或双击)">✓ 完成</button>
+    <button class="icon-btn" id="zoom-out" onclick="changeZoom(-0.25)">−</button>
+    <button class="icon-btn" id="zoom-in" onclick="changeZoom(0.25)">+</button>
+    <span style="font-size:11px;color:var(--muted)" id="zoom-label">100%</span>
+</header>
+
+<!-- Page navigation -->
+<div id="page-nav" class="hidden">
+    <button class="icon-btn" id="prev-btn" onclick="changePage(-1)" disabled>◀ 上一页</button>
+    <button class="icon-btn" id="next-btn" onclick="changePage(1)" disabled>下一页 ▶</button>
+    <div class="page-jump">
+        <label style="color:var(--muted);font-size:12px;">跳转:</label>
+        <input type="number" id="page-input" value="1" min="1">
+        <button class="icon-btn" onclick="jumpToPage()">GO</button>
+    </div>
+    <span id="page-info">第 1 页 / 共 1 页</span>
+    <span style="color:var(--muted);font-size:11px;margin-left:auto;">双击完成当前测量 | 右键取消</span>
+</div>
+
+<div class="main">
+    <div id="viewer-wrap">
+        <div id="canvas-container">
+            <canvas id="pdf-canvas"></canvas>
+            <svg id="svg-overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+    </div>
+
+    <div id="sidebar">
+        <div class="sidebar-header">测量记录</div>
+        <div id="measurements"><p style="color:var(--muted);font-size:11px;padding:10px;">暂无测量结果</p></div>
+        <div class="sidebar-footer">
+            <div class="total-box">
+                <div class="total-label">合计面积</div>
+                <div class="total-val" id="total-area">0.00 m²</div>
+                <div class="total-label" style="margin-top:8px;">合计长度</div>
+                <div class="total-val" id="total-length" style="font-size:16px;">0.00 m</div>
+            </div>
+            <button class="clear-btn" onclick="clearAll()">清除所有测量</button>
+        </div>
+    </div>
+</div>
+
+<div id="status-bar">请上传 PDF 图纸以开始</div>
+<div id="cursor-dot"></div>
+
+<script>
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+// ── State ──────────────────────────────────────────────────────────────────
+let pdfDoc = null;
+let currentPage = 1;
+let totalPages = 1;
+let renderScale = 1.5;   // PDF render scale
+let zoomLevel = 1.0;     // display zoom
+
+let mode = 'area';       // 'area' | 'length'
+let currentPoints = [];  // in-progress shape points (canvas coords)
+let measurements = [];   // completed measurements
+let measureCount = 0;
+
+const COLORS = ['#e94560','#00d2ff','#f4a261','#2ec4b6','#e9c46a','#a8dadc'];
+
+// ── DOM ─────────────────────────────────────────────────────────────────────
+const canvas      = document.getElementById('pdf-canvas');
+const ctx         = canvas.getContext('2d');
+const svg         = document.getElementById('svg-overlay');
+const statusBar   = document.getElementById('status-bar');
+const pageNav     = document.getElementById('page-nav');
+const pageInfo    = document.getElementById('page-info');
+const prevBtn     = document.getElementById('prev-btn');
+const nextBtn     = document.getElementById('next-btn');
+const cursorDot   = document.getElementById('cursor-dot');
+
+// ── PDF loading ──────────────────────────────────────────────────────────────
+document.getElementById('file-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setStatus('正在加载 PDF…');
+    const arrayBuf = await file.arrayBuffer();
+    pdfDoc = await pdfjsLib.getDocument(new Uint8Array(arrayBuf)).promise;
+    totalPages = pdfDoc.numPages;
+    currentPage = 1;
+    pageNav.classList.remove('hidden');
+    updatePageUI();
+    await renderPage(currentPage);
+    setStatus(`图纸已加载，共 <span>${totalPages}</span> 页，请在图纸上点击以标记点位`);
+});
+
+// ── Page rendering ───────────────────────────────────────────────────────────
+async function renderPage(num) {
+    const page = await pdfDoc.getPage(num);
+    const viewport = page.getViewport({ scale: renderScale * zoomLevel });
+
+    canvas.width  = viewport.width;
+    canvas.height = viewport.height;
+    svg.setAttribute('width',  viewport.width);
+    svg.setAttribute('height', viewport.height);
+    svg.setAttribute('viewBox', `0 0 ${viewport.width} ${viewport.height}`);
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    // Redraw completed measurements for current page
+    redrawSVG();
+}
+
+// ── Page navigation ──────────────────────────────────────────────────────────
+function changePage(delta) {
+    const target = currentPage + delta;
+    if (target < 1 || target > totalPages) return;
+    finishShape();          // auto-close any open shape
+    currentPage = target;
+    currentPoints = [];
+    updatePageUI();
+    renderPage(currentPage);
+}
+
+function jumpToPage() {
+    const val = parseInt(document.getElementById('page-input').value);
+    if (isNaN(val) || val < 1 || val > totalPages) return;
+    finishShape();
+    currentPage = val;
+    currentPoints = [];
+    updatePageUI();
+    renderPage(currentPage);
+}
+
+function updatePageUI() {
+    pageInfo.textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页`;
+    document.getElementById('page-input').value = currentPage;
+    prevBtn.disabled = currentPage <= 1;
+    nextBtn.disabled = currentPage >= totalPages;
+}
+
+// ── Zoom ─────────────────────────────────────────────────────────────────────
+function changeZoom(delta) {
+    zoomLevel = Math.max(0.25, Math.min(4, zoomLevel + delta));
+    document.getElementById('zoom-label').textContent = Math.round(zoomLevel * 100) + '%';
+    if (pdfDoc) renderPage(currentPage);
+}
+
+// ── Mode ─────────────────────────────────────────────────────────────────────
+function setMode(m) {
+    finishShape();
+    mode = m;
+    document.getElementById('btn-area').classList.toggle('active', m === 'area');
+    document.getElementById('btn-length').classList.toggle('active', m === 'length');
+    setStatus(m === 'area' ? '面积模式：点击描边轮廓，双击完成' : '长度模式：点击描线路径，双击完成');
+}
+
+// ── Canvas interaction ────────────────────────────────────────────────────────
+let lastClickTime = 0;
+
+canvas.addEventListener('mousedown', (e) => {
+    if (!pdfDoc) return;
+    if (e.button === 2) { finishShape(); return; }
+
+    const pt = getCanvasPoint(e);
+    const now = Date.now();
+
+    if (now - lastClickTime < 350) {
+        // Double-click → finish
+        finishShape();
+        lastClickTime = 0;
+        return;
+    }
+    lastClickTime = now;
+
+    currentPoints.push(pt);
+    redrawSVG();
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    if (!pdfDoc || currentPoints.length === 0) return;
+    const pt = getCanvasPoint(e);
+    redrawSVG(pt);   // pass live mouse position for preview line
+});
+
+canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); finishShape(); });
+
+// cursor dot
+document.addEventListener('mousemove', (e) => {
+    if (!pdfDoc) return;
+    cursorDot.style.left = e.clientX + 'px';
+    cursorDot.style.top  = e.clientY + 'px';
+    cursorDot.style.display = 'block';
+});
+document.addEventListener('mouseleave', () => { cursorDot.style.display = 'none'; });
+
+function getCanvasPoint(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: (e.clientX - rect.left) * (canvas.width / rect.width),
+        y: (e.clientY - rect.top)  * (canvas.height / rect.height)
+    };
+}
+
+// ── Shape finishing ───────────────────────────────────────────────────────────
+function finishShape() {
+    const minPts = mode === 'area' ? 3 : 2;
+    if (currentPoints.length < minPts) { currentPoints = []; redrawSVG(); return; }
+
+    const color = COLORS[measureCount % COLORS.length];
+    const ratio  = parseFloat(document.getElementById('scale-ratio').value) || 100;
+    // pixels per metre at current render scale: PDF is 72dpi, renderScale applied
+    // 1 PDF unit = 1/72 inch. At scale 1:ratio, 1 PDF unit = ratio/72 inch in reality
+    // px→m = (ratio / (renderScale * zoomLevel)) / (72 * 39.3701)
+    const pxPerMetre = (renderScale * zoomLevel) * 72 * 39.3701 / ratio;
+
+    let value, unit, label;
+    if (mode === 'area') {
+        const areaPx2 = shoelace(currentPoints);
+        value = areaPx2 / (pxPerMetre * pxPerMetre);
+        unit = 'm²';
+        label = `面积 #${++measureCount}`;
+    } else {
+        let lenPx = 0;
+        for (let i = 1; i < currentPoints.length; i++) {
+            lenPx += dist(currentPoints[i-1], currentPoints[i]);
+        }
+        value = lenPx / pxPerMetre;
+        unit = 'm';
+        label = `长度 #${++measureCount}`;
+    }
+
+    measurements.push({
+        id: measureCount,
+        label,
+        mode,
+        page: currentPage,
+        points: [...currentPoints],
+        value,
+        unit,
+        color
+    });
+
+    currentPoints = [];
+    redrawSVG();
+    updateSidebar();
+    setStatus(`已记录 <span>${label}</span>：${value.toFixed(2)} ${unit}`);
+}
+
+function undoPoint() {
+    if (currentPoints.length === 0) return;
+    currentPoints.pop();
+    redrawSVG();
+}
+
+function clearAll() {
+    measurements = [];
+    currentPoints = [];
+    measureCount = 0;
+    redrawSVG();
+    updateSidebar();
+    setStatus('已清除所有测量');
+}
+
+// ── SVG drawing ──────────────────────────────────────────────────────────────
+function redrawSVG(mousePos) {
+    svg.innerHTML = '';
+
+    // Completed measurements for current page
+    for (const m of measurements) {
+        if (m.page !== currentPage) continue;
+        drawSVGShape(m.points, m.color, m.mode, false);
+    }
+
+    // In-progress shape
+    if (currentPoints.length > 0) {
+        const pts = mousePos ? [...currentPoints, mousePos] : currentPoints;
+        drawSVGShape(pts, '#ffffff', mode, true);
+        // draw vertex dots
+        for (const p of currentPoints) {
+            const c = mkEl('circle');
+            c.setAttribute('cx', p.x); c.setAttribute('cy', p.y);
+            c.setAttribute('r', 4); c.setAttribute('fill', '#ffffff');
+            c.setAttribute('stroke', '#333'); c.setAttribute('stroke-width', 1);
+            svg.appendChild(c);
+        }
+    }
+}
+
+function drawSVGShape(pts, color, shapeMode, dashed) {
+    if (pts.length < 2) return;
+    const closed = shapeMode === 'area' && pts.length > 2;
+    const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + (closed ? ' Z' : '');
+    const path = mkEl('path');
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', color);
+    path.setAttribute('stroke-width', 2);
+    path.setAttribute('fill', closed ? color : 'none');
+    path.setAttribute('fill-opacity', closed ? '0.18' : '0');
+    if (dashed) path.setAttribute('stroke-dasharray', '6 4');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+}
+
+function mkEl(tag) { return document.createElementNS('http://www.w3.org/2000/svg', tag); }
+
+// ── Sidebar ──────────────────────────────────────────────────────────────────
+function updateSidebar() {
+    const container = document.getElementById('measurements');
+    if (measurements.length === 0) {
+        container.innerHTML = '<p style="color:var(--muted);font-size:11px;padding:10px;">暂无测量结果</p>';
+        document.getElementById('total-area').textContent = '0.00 m²';
+        document.getElementById('total-length').textContent = '0.00 m';
+        return;
+    }
+    container.innerHTML = '';
+    let totalArea = 0, totalLen = 0;
+    for (const m of measurements) {
+        if (m.mode === 'area') totalArea += m.value;
+        else totalLen += m.value;
+
+        const div = document.createElement('div');
+        div.className = 'measure-item';
+        div.style.borderLeftColor = m.color;
+        div.innerHTML = `
+            <div class="m-label" style="color:${m.color}">${m.label}</div>
+            <div class="m-value">${m.value.toFixed(2)} ${m.unit}</div>
+            <div class="m-meta">第 ${m.page} 页</div>
+            <button class="del-btn" onclick="deleteMeasure(${m.id})">✕</button>
+        `;
+        container.appendChild(div);
+    }
+    document.getElementById('total-area').textContent = totalArea.toFixed(2) + ' m²';
+    document.getElementById('total-length').textContent = totalLen.toFixed(2) + ' m';
+}
+
+function deleteMeasure(id) {
+    measurements = measurements.filter(m => m.id !== id);
+    redrawSVG();
+    updateSidebar();
+}
+
+// ── Math helpers ─────────────────────────────────────────────────────────────
+function shoelace(pts) {
+    let area = 0;
+    for (let i = 0; i < pts.length; i++) {
+        const j = (i + 1) % pts.length;
+        area += pts[i].x * pts[j].y;
+        area -= pts[j].x * pts[i].y;
+    }
+    return Math.abs(area) / 2;
+}
+
+function dist(a, b) {
+    return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+// ── Status bar ────────────────────────────────────────────────────────────────
+function setStatus(html) { statusBar.innerHTML = html; }
+</script>
+</body>
+</html>
